@@ -1,0 +1,24 @@
+[package]
+name = "compress"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "*", features = ["derive"] }
+liblzma = { version = "*", features = ["parallel"] }
+num_cpus = "*"
+chacha20 = "*"
+rpassword = "7.3.1"
+argon2 = { version = "0.5.3", features = ["alloc"] }
+rand_chacha = "0.3.1"
+rand_core = { version = "0.6.4", features = ["getrandom"] }
+
+[profile.release]
+lto = true
+strip = true
+
+[features]
+default = []
+static = ["liblzma/static"]
