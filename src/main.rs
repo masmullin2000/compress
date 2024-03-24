@@ -29,6 +29,7 @@ struct IoBufs {
 
 impl IoBufs {
     fn new(args: &Args) -> Self {
+        #[allow(clippy::option_if_let_else)] // excuse: Nursery gets this wrong
         let input: Box<dyn BufRead> = match args.input {
             None => {
                 if std::io::stdin().is_terminal() {
@@ -46,6 +47,7 @@ impl IoBufs {
             }
         };
 
+        #[allow(clippy::option_if_let_else)] // excuse: Nursery gets this wrong
         let output: Box<dyn Write> = match args.output {
             None => {
                 if std::io::stdout().is_terminal() {
@@ -75,13 +77,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let io = IoBufs::new(&args);
     let password = rpassword::prompt_password("Enter Passphrase: ").unwrap();
 
-    let ret = if !args.decompress {
-        let default_thread_count = num_cpus::get_physical() as u32 * 3 / 2;
+    let ret = if args.decompress {
+        decompress(io, &password)
+    } else {
+        let default_thread_count = u32::try_from(num_cpus::get_physical())? * 3 / 2;
         let threads = args.threads.unwrap_or(default_thread_count);
 
-        compress(io, args.level, threads, password)
-    } else {
-        decompress(io, password)
+        compress(io, args.level, threads, &password)
     };
     if let Err(e) = ret {
         eprintln!("Error: {e}");
@@ -93,7 +95,7 @@ fn compress(
     mut io: IoBufs,
     level: u32,
     threads: u32,
-    password: String,
+    password: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let level = std::cmp::min(9, level);
 
@@ -131,7 +133,7 @@ fn compress(
     Ok(())
 }
 
-fn decompress(mut io: IoBufs, password: String) -> Result<(), Box<dyn std::error::Error>> {
+fn decompress(mut io: IoBufs, password: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut nonce = chacha20::XNonce::default();
     let mut salt: [u8; 32] = [0; 32];
     io.input.read_exact(&mut nonce)?;
