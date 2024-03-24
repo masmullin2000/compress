@@ -15,6 +15,10 @@ argon2 = { version = "0.5.3", features = ["alloc"] }
 rand_chacha = "0.3.1"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 
+[lib]
+name = "libcomp"
+path = "src/lib.rs"
+
 [profile.release]
 lto = true
 strip = true
