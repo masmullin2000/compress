@@ -1,5 +1,4 @@
-use std::io::{prelude::*, IsTerminal};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufRead, BufReader, BufWriter, IsTerminal, Write};
 
 use crate::args::Args;
 

@@ -8,18 +8,37 @@ use std::io::Read;
 use liblzma::read;
 use rand_chacha::rand_core::SeedableRng;
 use rand_core::RngCore;
+use zeroize::Zeroize;
 
 use crate::iobuf::IoBufs;
 
 const MEM_COST: u32 = 65535;
 const ITER_COST: u32 = 10;
 const PARA_COST: u32 = 4;
+const SALT_LENGTH: usize = 40; // argon2 salt is between 8 and 48 bytes long. 16 is sufficient
+
+fn get_key(mut password: String, salt: &[u8]) -> Result<chacha20::Key, Box<dyn std::error::Error>> {
+    let argon_param =
+        argon2::Params::new(MEM_COST, ITER_COST, PARA_COST, None).map_err(|e| format!("{e}"))?;
+    let argon = argon2::Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        argon_param,
+    );
+
+    let mut key = chacha20::Key::default();
+    argon
+        .hash_password_into(password.as_bytes(), salt, key.as_mut_slice())
+        .map_err(|e| format!("{e}"))?;
+    password.zeroize();
+    Ok(key)
+}
 
 pub fn compress(
     mut io: IoBufs,
     level: u32,
     threads: u32,
-    password: &str,
+    password: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let level = std::cmp::min(9, level);
 
@@ -31,25 +50,15 @@ pub fn compress(
     let xzenc = read::XzEncoder::new_stream(io.input, stream);
 
     let mut rng = rand_chacha::ChaChaRng::from_entropy();
-    let mut salt: [u8; 32] = [0; 32];
-    let mut nonce = chacha20::XNonce::default();
+    let mut salt = [0; SALT_LENGTH];
     rng.fill_bytes(&mut salt);
-    rng.fill_bytes(&mut nonce);
 
-    let argon_param = argon2::Params::new(MEM_COST, ITER_COST, PARA_COST, None)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e}")))?;
-    let argon = argon2::Argon2::new(
-        argon2::Algorithm::Argon2id,
-        argon2::Version::V0x13,
-        argon_param,
-    );
+    let mut nonce = chacha20::XNonce::default();
+    rng.fill_bytes(nonce.as_mut_slice());
 
-    let mut hash: [u8; 32] = [0; 32];
-    argon
-        .hash_password_into(password.as_bytes(), &salt, &mut hash)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e}")))?;
+    let key = get_key(password, &salt)?;
 
-    let mut ciph = CipherReader::new(xzenc, hash.into(), nonce);
+    let mut ciph = CipherReader::new(xzenc, key, nonce);
 
     io.output.write_all(&nonce)?;
     io.output.write_all(&salt)?;
@@ -58,26 +67,14 @@ pub fn compress(
     Ok(())
 }
 
-pub fn decompress(mut io: IoBufs, password: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn decompress(mut io: IoBufs, password: String) -> Result<(), Box<dyn std::error::Error>> {
     let mut nonce = chacha20::XNonce::default();
-    let mut salt: [u8; 32] = [0; 32];
+    let mut salt = [0; SALT_LENGTH];
     io.input.read_exact(&mut nonce)?;
     io.input.read_exact(&mut salt)?;
 
-    let argon_param = argon2::Params::new(MEM_COST, ITER_COST, PARA_COST, None)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e}")))?;
-    let argon = argon2::Argon2::new(
-        argon2::Algorithm::Argon2id,
-        argon2::Version::V0x13,
-        argon_param,
-    );
-
-    let mut hash: [u8; 32] = [0; 32];
-    argon
-        .hash_password_into(password.as_bytes(), &salt, &mut hash)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e}")))?;
-
-    let ciph = CipherReader::new(io.input, hash.into(), nonce);
+    let key = get_key(password, &salt)?;
+    let ciph = CipherReader::new(io.input, key, nonce);
     let mut dec = read::XzDecoder::new_parallel(ciph);
 
     std::io::copy(&mut dec, &mut io.output)?;
